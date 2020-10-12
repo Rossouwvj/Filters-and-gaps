@@ -1,0 +1,177 @@
+---
+title: "Various FIlters applied to GDP"
+author: "Rossouw v. Jaarsveld"
+date: "15/09/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tsm)
+library(mFilter)
+
+if (!require("pacman")) install.packages("pacman")
+p_load(devtools,forecast,ggplot2,dplyr,zoo, xtable)
+
+gdp<- readRDS("gdp.rds")
+```
+
+## Set-up
+
+I set up quick code that applies various filters to the GDPMP6 variable taken from SPARTADATA. One issue throughout is that the 2020Q2 out-turn is a massive outlier. This of course influences the results of all the filters. I have not taken any steps to control for this outlier.   
+A small disclaimer: I spent about 30mins on this. Mistakes are possible.
+
+## Linear time trend
+
+This is a simple linear deterministic time trend. 
+
+```{r lin, echo=FALSE,message=FALSE}
+
+lin.mod <- lm(gdp ~ time(gdp))
+lin.trend <- lin.mod$fitted.values  # fitted values pertain to time trend
+linear <- ts(lin.trend, start = c(1960, 1), frequency = 4)  # create a time series variable for trend
+lin.cycle <- gdp - linear  # cycle is the difference between the data and linear trend
+
+par(mfrow = c(1, 2), mar = c(2.2, 2.2, 1, 1), cex = 0.8)  # plot two graphs side by side and squash margins
+plot.ts(gdp, ylab = "")  # first plot time series
+lines(linear, col = "red")  # include lines over the plot
+legend("topleft", legend = c("data", "trend"), lty = 1, 
+       col = c("black", "red"), bty = "n")
+plot.ts(lin.cycle, ylab = "")  # second plot for cycle
+legend("topright", legend = c("cycle    "), lty = 1, col = c("black"), 
+       bty = "n")
+```
+
+\newpage
+## Hodrick-Prescott (HP) filter
+
+A key input in this filter is $\lambda$. I followed standard convention and set $\lambda = 1600$.
+
+```{r hp, echo=FALSE}
+hp.decom <- hpfilter(gdp, freq = 1600, type = "lambda")
+
+par(mfrow = c(1, 2), mar = c(2.2, 2.2, 1, 1), cex = 0.8)
+plot.ts(gdp, ylab = "")  # plot time series
+lines(hp.decom$trend, col = "red")  # include HP trend
+legend("topleft", legend = c("data", "HPtrend"), lty = 1, 
+       col = c("black", "red"), bty = "n")
+plot.ts(hp.decom$cycle, ylab = "")  # plot cycle
+legend("topleft", legend = c("HPcycle"), lty = 1, col = c("black"), 
+       bty = "n")
+```
+
+\newpage
+## Baxter-King (BK) filter
+
+A key input is the frequency band for the cycle. I set the upper limit at $32$ and the lower limit at $6$.
+
+```{r BK, echo=FALSE}
+bp.decom <- bkfilter(gdp, pl = 6, pu = 32)
+
+par(mfrow = c(1, 2), mar = c(2.2, 2.2, 1, 1), cex = 0.8)
+plot.ts(gdp, ylab = "")
+lines(bp.decom$trend, col = "red")
+legend("topleft", legend = c("data", "BPtrend"), lty = 1, 
+       col = c("black", "red"), bty = "n")
+plot.ts(bp.decom$cycle, ylab = "")
+legend("topleft", legend = c("BPcycle"), lty = 1, col = c("black"), 
+       bty = "n")
+
+```
+
+\newpage
+## Christiano-Fitzgerald (CF) filter
+
+Same as for the BK filter, a key input is the frequency band for the cycle. I set the upper limit at $32$ and the lower limit at $6$.
+
+```{r CF, echo=FALSE}
+cf.decom <- cffilter(gdp, pl = 6, pu = 32, root = TRUE)
+
+par(mfrow = c(1, 2), mar = c(2.2, 2.2, 1, 1), cex = 0.8)
+plot.ts(gdp, ylab = "")
+lines(cf.decom$trend, col = "red")
+legend("topleft", legend = c("data", "CFtrend"), lty = 1, 
+       col = c("black", "red"), bty = "n")
+plot.ts(cf.decom$cycle, ylab = "")
+legend("topleft", legend = c("CFcycle"), lty = 1, col = c("black"), 
+       bty = "n")
+```
+
+\newpage
+## Beveridge-Nelson filter
+
+This approach is slightly different from the rest. It will decompose the data into a stochastic trend and stationary cycle. The key input here is the number of lags that would pertain to the stationary component. I set this to $8$ lags
+
+```{r BN, echo=FALSE}
+bn.decomp <- bnd(gdp, nlag = 8)  # apply the BN decomposition that creates dataframe
+
+bn.trend <- ts(bn.decomp[, 1], start = c(1960, 1), frequency = 4)  # first column contains trend
+bn.cycle <- ts(bn.decomp[, 2], start = c(1960, 1), frequency = 4)  # second column contains cycle
+
+par(mfrow = c(1, 2), mar = c(2.2, 2.2, 1, 1), cex = 0.8)
+plot.ts(bn.trend, ylab = "",col = "red")
+lines(gdp, col = "black")
+legend("topleft", legend = c("BNtrend","data"), lty = 1, 
+       col = c("red","black"), bty = "n")
+plot.ts(bn.cycle, ylab = "")
+legend("topleft", legend = c("BNcycle"), lty = 1, col = c("black"), 
+       bty = "n")
+
+```
+
+\newpage
+## Comparing all the filters on a single graph
+
+```{r all, echo=FALSE}
+comb <- ts.union(lin.cycle, hp.decom$cycle, bp.decom$cycle, 
+    cf.decom$cycle, bn.cycle)
+
+par(mfrow = c(1, 1), mar = c(2.2, 2.2, 2, 1), cex = 0.8)
+plot.ts(comb, ylab = "", plot.type = "single", col = c("blue", 
+    "red", "darkgrey", "sienna", "darkgreen"))
+legend("topleft", legend = c("linear", "hp-filter", "bp-filter", 
+    "cf-filter", "bn-decomp"), lty = 1, col = c("blue", 
+    "red", "darkgrey", "sienna", "darkgreen"), bty = "n")
+```
+
+
+
+## Potential estimates from 2019
+```{r pot, echo=FALSE}
+
+comb_pot <- ts.union(lin.trend,hp.decom$trend,bp.decom$trend,cf.decom$trend,bn.trend)
+comb_pot <- window(comb_pot, start = c(2019,1))
+
+comb_pot <- zoo(comb_pot)
+index(comb_pot) <- as.yearqtr(index(comb_pot))
+
+par(mfrow = c(1, 1), mar = c(2.2, 2.2, 2, 1), cex = 0.8)
+plot.zoo(comb_pot, ylab = "", plot.type = "single", col = c("blue", 
+    "red", "darkgrey", "sienna", "darkgreen"))
+legend("topleft", legend = c("linear", "hp-filter", "bp-filter", 
+    "cf-filter", "bn-decomp"), lty = 1, col = c("blue", 
+    "red", "darkgrey", "sienna", "darkgreen"), bty = "n")
+
+
+
+```
+
+In tabulated form:
+
+```{r pot table, echo=FALSE, results = "asis"}
+colnames(comb_pot) <- c("linear", "hp-filter", "bp-filter", 
+    "cf-filter", "bn-decomp")
+
+print(xtable(comb_pot,type = "latex"),comment=FALSE)
+```
+
+Note that a feature of the Baxter-King filter is that values at the start and end of the sample is removed. Hence the empty values for the end of sample period in the table and graph.
+
+## If anyone cares the next step are...
+
+* Looking at the official output gap series of the SARB, it appears to be reported as a percentage of potential? To compare that to what I have done I will need to convert mine to be the same.
+* I think wavelet filters are way better than any of these I reported here. Or the method proposed by the king of time series (Hamilton) : https://www.nber.org/papers/w23429
+* If you want to use this to look at business cycles, it will be useful to look at spectral decompositions and periodograms of the filters. 
+* It will be a good idea to run some further analysis on all of the estimates from the various filters. Check for unit roots, see what it looks like in the Taylor rule, check forecast performance etc.
+
+
